@@ -249,11 +249,14 @@
     .item-source {
       font-size: 10px;
       font-weight: 700;
-      padding: 2px 6px;
-      border-radius: 3px;
+      padding: 3px 8px;
+      border-radius: 20px;
       letter-spacing: 0.4px;
       flex-shrink: 0;
       text-transform: uppercase;
+      align-self: center;
+      height: auto;
+      line-height: 1.4;
     }
 
     .item-source.n12 {
@@ -339,27 +342,87 @@
     @keyframes spin {
       to { transform: rotate(360deg); }
     }
+
+    /* ─── Resize Handles (top/bottom edges) ─── */
+    .resize-handle-top,
+    .resize-handle-bottom {
+      position: absolute;
+      left: 0;
+      right: 0;
+      height: 6px;
+      cursor: ns-resize;
+      z-index: 10;
+    }
+
+    .resize-handle-top    { top: 0;    border-radius: 10px 10px 0 0; }
+    .resize-handle-bottom { bottom: 0; border-radius: 0 0 10px 10px; }
+
+    .resize-handle-top:hover,
+    .resize-handle-bottom:hover {
+      background: rgba(229, 57, 53, 0.25);
+    }
+
+    /* ─── Width Resize Handles (left/right edges) ─── */
+    .widget-outer {
+      position: relative;
+    }
+
+    .width-handle {
+      position: absolute;
+      top: 0;
+      height: 100%;
+      width: 10px;
+      cursor: ew-resize;
+      z-index: 20;
+    }
+
+    .width-handle.left  { left:  -5px; }
+    .width-handle.right { right: -5px; }
+
+    .width-handle::after {
+      content: '';
+      position: absolute;
+      top: 20%;
+      bottom: 20%;
+      left: 50%;
+      width: 3px;
+      transform: translateX(-50%);
+      background: rgba(229, 57, 53, 0);
+      border-radius: 2px;
+      transition: background 0.2s;
+    }
+
+    .width-handle:hover::after {
+      background: rgba(229, 57, 53, 0.5);
+    }
+
   `;
 
   // ─── Widget HTML ────────────────────────────────────────────
   const container = document.createElement("div");
   container.innerHTML = `
-    <div class="ticker-bar" id="tickerBar">
-      <button class="ticker-toggle" id="closeBtn" title="הסתר">✕</button>
-      <div class="ticker-label">
-        <span class="live-dot"></span>
-        <span>חדשות</span>
-      </div>
-      <div class="ticker-track-wrapper" id="trackWrapper">
-        <div class="ticker-track" id="tickerTrack">
-          <div class="ticker-loading" id="loadingState">
-            <div class="spinner"></div>
-            <span>טוען עדכונים...</span>
+    <div class="widget-outer">
+      <div class="width-handle left"  id="widthHandleLeft"  title="גרור לשינוי רוחב"></div>
+      <div class="width-handle right" id="widthHandleRight" title="גרור לשינוי רוחב"></div>
+      <div class="ticker-bar" id="tickerBar">
+        <div class="resize-handle-top"    id="resizeHandleTop"    title="גרור לשינוי גובה"></div>
+        <div class="resize-handle-bottom" id="resizeHandleBottom" title="גרור לשינוי גובה"></div>
+        <button class="ticker-toggle" id="closeBtn" title="הסתר">✕</button>
+        <div class="ticker-label">
+          <span class="live-dot"></span>
+          <span>חדשות</span>
+        </div>
+        <div class="ticker-track-wrapper" id="trackWrapper">
+          <div class="ticker-track" id="tickerTrack">
+            <div class="ticker-loading" id="loadingState">
+              <div class="spinner"></div>
+              <span>טוען עדכונים...</span>
+            </div>
           </div>
         </div>
-      </div>
-      <div class="drag-handle" id="dragHandle" title="גרור">
-        <svg viewBox="0 0 24 24"><circle cx="9" cy="6" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="18" r="1.5"/></svg>
+        <div class="drag-handle" id="dragHandle" title="גרור">
+          <svg viewBox="0 0 24 24"><circle cx="9" cy="6" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="18" r="1.5"/></svg>
+        </div>
       </div>
     </div>
   `;
@@ -368,10 +431,15 @@
   shadow.appendChild(container);
 
   // ─── References ─────────────────────────────────────────────
-  const tickerBar = shadow.getElementById("tickerBar");
-  const tickerTrack = shadow.getElementById("tickerTrack");
-  const closeBtn = shadow.getElementById("closeBtn");
-  const dragHandle = shadow.getElementById("dragHandle");
+  const tickerBar           = shadow.getElementById("tickerBar");
+  const tickerTrack         = shadow.getElementById("tickerTrack");
+  const closeBtn            = shadow.getElementById("closeBtn");
+  const dragHandle          = shadow.getElementById("dragHandle");
+  const resizeHandleTop     = shadow.getElementById("resizeHandleTop");
+  const resizeHandleBottom  = shadow.getElementById("resizeHandleBottom");
+  const widthHandleLeft     = shadow.getElementById("widthHandleLeft");
+  const widthHandleRight    = shadow.getElementById("widthHandleRight");
+
 
   let newsItems = [];
 
@@ -386,7 +454,129 @@
   });
   const scrollSpeed = 60; // pixels per second
 
-  // ─── Drag Logic ─────────────────────────────────────────────
+  // ─── Apply Strip Style (height → font auto-scales) ─────────
+  // Font scales proportionally with height: base 14px at 42px height
+  function applyStripStyle(height) {
+    const h = Math.min(80, Math.max(28, height || 42));
+    const f = Math.min(22, Math.max(10, Math.round(14 * h / 42)));
+    tickerBar.style.height = h + 'px';
+    shadow.querySelectorAll('.ticker-item').forEach(el => {
+      el.style.height = h + 'px';
+    });
+    shadow.querySelectorAll('.item-text').forEach(el => {
+      el.style.fontSize = f + 'px';
+    });
+    currentHeight = h;
+    currentFontSize = f;
+  }
+
+  let currentHeight = 42;
+  let currentFontSize = 14;
+  let currentWidth = null; // null = use default % width
+
+  function persistStripStyle() {
+    const toSave = { stripHeight: currentHeight };
+    if (currentWidth !== null) toSave.stripWidth = currentWidth;
+    chrome.runtime.sendMessage({ type: "SET_SETTINGS", settings: toSave });
+  }
+
+  // ─── Height Resize (top & bottom edge handles) ────────────────
+  // dir: -1 for top handle (drag up = bigger), +1 for bottom (drag down = bigger)
+  let isResizing = false;
+  let resizeStartY = 0;
+  let resizeStartHeight = 0;
+  let resizeDir = -1;
+
+  function startHeightResize(e, dir) {
+    isResizing = true;
+    resizeDir = dir;
+    resizeStartY = e.clientY;
+    resizeStartHeight = tickerBar.offsetHeight;
+    e.preventDefault();
+    e.stopPropagation();
+    document.body.style.cursor = 'ns-resize';
+  }
+
+  resizeHandleTop.addEventListener("mousedown",    (e) => startHeightResize(e, +1));
+  resizeHandleBottom.addEventListener("mousedown", (e) => startHeightResize(e, -1));
+
+  document.addEventListener("mousemove", (e) => {
+    if (!isResizing) return;
+    const delta = (resizeStartY - e.clientY) * resizeDir;
+    const newH = Math.min(80, Math.max(28, resizeStartHeight + delta));
+    applyStripStyle(newH);
+  });
+
+  document.addEventListener("mouseup", () => {
+    if (isResizing) {
+      isResizing = false;
+      document.body.style.cursor = '';
+      persistStripStyle();
+    }
+  });
+
+  // ─── Width Resize (left / right edge handles) ───────────────
+  let isWidthResizing = false;
+  let widthResizeEdge = null; // 'left' or 'right'
+  let widthResizeStartX = 0;
+  let widthResizeStartW = 0;
+  let widthResizeStartLeft = 0;
+
+  function startWidthResize(e, edge) {
+    isWidthResizing = true;
+    widthResizeEdge = edge;
+    widthResizeStartX = e.clientX;
+    // Snapshot current pixel width
+    widthResizeStartW = host.offsetWidth;
+    widthResizeStartLeft = host.getBoundingClientRect().left;
+    // Ensure absolute positioning so width changes don't re-center
+    host.style.left = widthResizeStartLeft + 'px';
+    host.style.transform = 'none';
+    host.style.bottom = 'auto';
+    const rect = host.getBoundingClientRect();
+    host.style.top = rect.top + 'px';
+    document.body.style.cursor = 'ew-resize';
+    e.preventDefault();
+    e.stopPropagation();
+  }
+
+  widthHandleLeft.addEventListener("mousedown",  (e) => startWidthResize(e, 'left'));
+  widthHandleRight.addEventListener("mousedown", (e) => startWidthResize(e, 'right'));
+
+  document.addEventListener("mousemove", (e) => {
+    if (!isWidthResizing) return;
+    const dx = e.clientX - widthResizeStartX;
+    let newW;
+    if (widthResizeEdge === 'right') {
+      // Right edge: drag right = wider
+      newW = Math.min(window.innerWidth - 20, Math.max(260, widthResizeStartW + dx));
+    } else {
+      // Left edge: drag left = wider, need to also shift position
+      newW = Math.min(window.innerWidth - 20, Math.max(260, widthResizeStartW - dx));
+      host.style.left = (widthResizeStartLeft + dx) + 'px';
+    }
+    host.style.width = newW + 'px';
+    currentWidth = newW;
+    // Re-measure for scroll engine
+    requestAnimationFrame(() => { halfWidth = tickerTrack.scrollWidth / 2; });
+  });
+
+  document.addEventListener("mouseup", () => {
+    if (isWidthResizing) {
+      isWidthResizing = false;
+      document.body.style.cursor = '';
+      persistStripStyle();
+      // Save left position too
+      chrome.storage.local.set({
+        tickerPosition: {
+          left: host.getBoundingClientRect().left,
+          top: host.getBoundingClientRect().top
+        }
+      });
+    }
+  });
+
+
   let isDragging = false;
   let dragStartX, dragStartY, hostStartX, hostStartY;
 
@@ -496,8 +686,11 @@
       el.innerHTML = `
         <span class="item-time">${time}</span>
         <span class="item-source ${sourceClass}">${sourceLabel}</span>
-        <span class="item-text">${textHtml}</span>
+        <span class="item-text" style="font-size:${currentFontSize}px">${textHtml}</span>
       `;
+      el.style.height = currentHeight + 'px';
+      el.style.lineHeight = currentHeight + 'px';
+
       fragment.appendChild(el);
 
       // Separator between items
@@ -649,7 +842,16 @@
           }
         });
       }
+      if (msg.settings.stripHeight !== undefined || msg.settings.fontSize !== undefined) {
+        chrome.storage.local.get(["stripHeight", "fontSize"], (data) => {
+          applyStripStyle(
+            msg.settings.stripHeight !== undefined ? msg.settings.stripHeight : data.stripHeight,
+            msg.settings.fontSize !== undefined ? msg.settings.fontSize : data.fontSize
+          );
+        });
+      }
     }
+
   });
 
   // ─── Storage Change Listener (backup for message delivery) ──
@@ -703,7 +905,7 @@
   }
 
   // ─── Initial Load ───────────────────────────────────────────
-  chrome.storage.local.get(["widgetVisible", "sources", "tickerPosition"], (data) => {
+  chrome.storage.local.get(["widgetVisible", "sources", "tickerPosition", "stripHeight", "stripWidth"], (data) => {
     // In top frame: apply visibility and position settings
     if (isTopFrame) {
       host.style.display = data.widgetVisible ? "block" : "none";
@@ -714,7 +916,15 @@
         host.style.bottom = 'auto';
         host.style.transform = 'none';
       }
+      // Restore saved width
+      if (data.stripWidth) {
+        host.style.width = data.stripWidth + 'px';
+        currentWidth = data.stripWidth;
+      }
     }
+    // Apply strip style (height → font scales automatically)
+    applyStripStyle(data.stripHeight);
+
     // In iframes: visibility is controlled by fullscreen events
 
     const sources = data.sources || { n12: true, ynet: true };

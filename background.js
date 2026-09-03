@@ -1,6 +1,6 @@
 // ============================================================
 //  Background Service Worker
-//  - Firebase SSE for N12 Chat Hakatavim
+//  - Firebase REST poll for N12 Chat Hakatavim (every 5 min)
 //  - Ynet RSS polling every 2 minutes
 //  - Programmatic content script injection (activeTab)
 // ============================================================
@@ -10,14 +10,10 @@ const DB_PATH = "desk12";
 const TOPIC_ID_FILTER = 1; // 1 = חדשות N12
 
 const YNET_RSS_URL = "https://www.ynet.co.il/Integration/StoryRss1854.xml";
-const YNET_POLL_INTERVAL_MS = 2 * 60 * 1000; // 2 minutes
 const MAX_PER_SOURCE = 10;
 
 let newsItems = [];
 let seenIds = new Set();
-let firebaseController = null;
-let firebaseRetryDelay = 30000;
-const MAX_FIREBASE_RETRY = 5 * 60 * 1000; // 5 minutes max
 
 // ─── Injected Tabs Tracking ──────────────────────────────────
 // Tracks tab IDs where the content script has been injected
@@ -36,8 +32,21 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
 });
 
 // ─── Content Script Injection ─────────────────────────────────
+const RESTRICTED_URL_PREFIXES = ["chrome://", "chrome-extension://", "edge://", "about:", "data:", "javascript:"];
+
 async function injectContentScript(tabId) {
   if (injectedTabs.has(tabId)) return true; // Already injected
+
+  // Check if the tab URL is accessible before injecting
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    const url = tab.url || "";
+    if (RESTRICTED_URL_PREFIXES.some(prefix => url.startsWith(prefix))) {
+      return false; // Silently skip restricted URLs
+    }
+  } catch (e) {
+    return false; // Tab doesn't exist or inaccessible
+  }
 
   try {
     await chrome.scripting.insertCSS({
@@ -74,136 +83,48 @@ startAll();
 
 async function startAll() {
   await loadStoredNews();
-  startFirebaseSSE();
+  fetchN12Snapshot(); // immediate first fetch
   fetchYnetRSS();
-  // Set up alarm for Ynet polling
+  // Alarms keep the service worker alive and trigger periodic polls
+  chrome.alarms.create("n12-poll",  { periodInMinutes: 5 });
   chrome.alarms.create("ynet-poll", { periodInMinutes: 2 });
 }
 
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === "ynet-poll") {
-    fetchYnetRSS();
-  }
+  if (alarm.name === "n12-poll")  fetchN12Snapshot();
+  if (alarm.name === "ynet-poll") fetchYnetRSS();
 });
 
-// ─── Firebase SSE Listener (no auth needed - DB is public) ────
-async function startFirebaseSSE() {
-  // Abort any existing connection
-  if (firebaseController) {
-    try { firebaseController.abort(); } catch (e) {}
-  }
-
+// ─── Firebase REST Snapshot Poll (every 5 min via alarm) ──────
+async function fetchN12Snapshot() {
   const url = `${FIREBASE_DB_URL}/${DB_PATH}.json`;
-
-  firebaseController = new AbortController();
-
   try {
-    const resp = await fetch(url, {
-      headers: { "Accept": "text/event-stream" },
-      signal: firebaseController.signal
-    });
-
+    const resp = await fetch(url);
     if (!resp.ok) {
-      console.error("[N12] Connection failed:", resp.status);
-      // Retry with exponential backoff
-      setTimeout(startFirebaseSSE, firebaseRetryDelay);
-      firebaseRetryDelay = Math.min(firebaseRetryDelay * 2, MAX_FIREBASE_RETRY);
+      console.error("[N12] Poll failed:", resp.status);
       return;
     }
+    const data = await resp.json();
+    if (typeof data !== "object" || data === null) return;
 
-    firebaseRetryDelay = 30000; // Reset backoff on successful connection
-    const reader = resp.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    let eventType = "";
+    let newCount = 0;
+    const entries = Object.entries(data)
+      .filter(([, msg]) => typeof msg === "object" && msg !== null)
+      .sort(([a], [b]) => a.localeCompare(b));
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
-
-      for (const line of lines) {
-        if (line.startsWith("event:")) {
-          eventType = line.slice(6).trim();
-          continue;
-        }
-
-        if (!line.startsWith("data:")) continue;
-
-        const dataStr = line.slice(5).trim();
-        if (!dataStr || dataStr === "null") continue;
-
-        let payload;
-        try {
-          payload = JSON.parse(dataStr);
-        } catch (e) {
-          continue;
-        }
-
-        if (typeof payload !== "object" || payload === null) continue;
-
-        const path = payload.path || "";
-        const data = payload.data;
-
-        // Initial load: all existing messages
-        if (path === "/" && typeof data === "object" && data !== null) {
-          const entries = Object.entries(data)
-            .filter(([id, msg]) => typeof msg === "object" && msg !== null)
-            .sort(([a], [b]) => a.localeCompare(b));
-
-          for (const [msgId, msg] of entries) {
-            const itemId = `n12-${msgId}`;
-            if (!seenIds.has(itemId)) {
-              seenIds.add(itemId);
-              const item = parseN12Message(msg, msgId);
-              if (item) newsItems.push(item);
-            }
-          }
-          trimAndBroadcast();
-          continue;
-        }
-
-        // New message: path = "/-OoXXX"
-        if (path && path !== "/" && path.split("/").length === 2) {
-          const msgId = path.replace("/", "");
-          const itemId = `n12-${msgId}`;
-          if (!seenIds.has(itemId) && typeof data === "object" && data !== null) {
-            seenIds.add(itemId);
-            const item = parseN12Message(data, msgId);
-            if (item) {
-              newsItems.unshift(item); // Add to front
-              trimAndBroadcast();
-            }
-          }
-          continue;
-        }
-
-        // Patch updates
-        if (eventType === "patch" && typeof data === "object" && data !== null) {
-          for (const [msgId, msg] of Object.entries(data)) {
-            const itemId = `n12-${msgId}`;
-            if (typeof msg === "object" && msg !== null && !seenIds.has(itemId)) {
-              seenIds.add(itemId);
-              const item = parseN12Message(msg, msgId);
-              if (item) {
-                newsItems.unshift(item);
-                trimAndBroadcast();
-              }
-            }
-          }
-        }
+    for (const [msgId, msg] of entries) {
+      const itemId = `n12-${msgId}`;
+      if (!seenIds.has(itemId)) {
+        seenIds.add(itemId);
+        const item = parseN12Message(msg, msgId);
+        if (item) { newsItems.push(item); newCount++; }
       }
     }
+
+    if (newCount > 0) trimAndBroadcast();
+    console.log(`[N12] Poll done — ${newCount} new item(s)`);
   } catch (e) {
-    if (e.name !== "AbortError") {
-      console.error("[N12] SSE Error:", e);
-      // Retry with exponential backoff
-      setTimeout(startFirebaseSSE, firebaseRetryDelay);
-      firebaseRetryDelay = Math.min(firebaseRetryDelay * 2, MAX_FIREBASE_RETRY);
-    }
+    console.error("[N12] Poll error:", e);
   }
 }
 
@@ -367,6 +288,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         n12: msg.settings.sources.n12 !== false,
         ynet: msg.settings.sources.ynet !== false
       };
+    }
+    if (typeof msg.settings?.stripHeight === 'number') {
+      allowed.stripHeight = Math.min(80, Math.max(28, msg.settings.stripHeight));
+    }
+    if (typeof msg.settings?.stripWidth === 'number') {
+      allowed.stripWidth = Math.min(7680, Math.max(260, msg.settings.stripWidth));
     }
     chrome.storage.local.set(allowed, () => {
       // If widget is being toggled ON, inject into the active tab first
