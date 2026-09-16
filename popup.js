@@ -4,10 +4,16 @@ const toggleVisible = document.getElementById("toggleVisible");
 const toggleN12 = document.getElementById("toggleN12");
 const toggleYnet = document.getElementById("toggleYnet");
 const statusText = document.getElementById("statusText");
+const speedSlider = document.getElementById("speedSlider");
+const speedValue = document.getElementById("speedValue");
 
 // Load current settings
-chrome.storage.local.get(["widgetVisible", "sources"], (data) => {
+chrome.storage.local.get(["widgetVisible", "sources", "scrollSpeed"], (data) => {
   toggleVisible.checked = data.widgetVisible !== false;
+  if (typeof data.scrollSpeed === "number") {
+    speedSlider.value = data.scrollSpeed;
+  }
+  speedValue.textContent = speedSlider.value;
   const sources = data.sources || { n12: true, ynet: true };
   toggleN12.checked = sources.n12 !== false;
   toggleYnet.checked = sources.ynet !== false;
@@ -30,6 +36,14 @@ toggleVisible.addEventListener("change", () => {
   chrome.runtime.sendMessage({
     type: "SET_SETTINGS",
     settings: { widgetVisible: toggleVisible.checked }
+  });
+});
+
+speedSlider.addEventListener("input", () => {
+  speedValue.textContent = speedSlider.value;
+  chrome.runtime.sendMessage({
+    type: "SET_SETTINGS",
+    settings: { scrollSpeed: Number(speedSlider.value) }
   });
 });
 

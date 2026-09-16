@@ -292,6 +292,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (typeof msg.settings?.stripHeight === 'number') {
       allowed.stripHeight = Math.min(80, Math.max(28, msg.settings.stripHeight));
     }
+    if (typeof msg.settings?.scrollSpeed === 'number') {
+      allowed.scrollSpeed = Math.min(200, Math.max(20, msg.settings.scrollSpeed));
+    }
     if (typeof msg.settings?.stripWidth === 'number') {
       allowed.stripWidth = Math.min(7680, Math.max(260, msg.settings.stripWidth));
     }

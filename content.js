@@ -452,7 +452,14 @@
       settings: { widgetVisible: false }
     });
   });
-  const scrollSpeed = 60; // pixels per second
+  const DEFAULT_SCROLL_SPEED = 60; // pixels per second
+  let scrollSpeed = DEFAULT_SCROLL_SPEED;
+
+  function applyScrollSpeed(speed) {
+    scrollSpeed = typeof speed === 'number'
+      ? Math.min(200, Math.max(20, speed))
+      : DEFAULT_SCROLL_SPEED;
+  }
 
   // ─── Apply Strip Style (height → font auto-scales) ─────────
   // Font scales proportionally with height: base 14px at 42px height
@@ -860,6 +867,9 @@
     if (changes.widgetVisible) {
       applyVisibility(changes.widgetVisible.newValue);
     }
+    if (changes.scrollSpeed) {
+      applyScrollSpeed(changes.scrollSpeed.newValue);
+    }
     if (changes.sources) {
       const sources = changes.sources.newValue || { n12: true, ynet: true };
       chrome.runtime.sendMessage({ type: "GET_NEWS" }, (resp) => {
@@ -905,7 +915,7 @@
   }
 
   // ─── Initial Load ───────────────────────────────────────────
-  chrome.storage.local.get(["widgetVisible", "sources", "tickerPosition", "stripHeight", "stripWidth"], (data) => {
+  chrome.storage.local.get(["widgetVisible", "sources", "tickerPosition", "stripHeight", "stripWidth", "scrollSpeed"], (data) => {
     // In top frame: apply visibility and position settings
     if (isTopFrame) {
       host.style.display = data.widgetVisible ? "block" : "none";
@@ -924,6 +934,7 @@
     }
     // Apply strip style (height → font scales automatically)
     applyStripStyle(data.stripHeight);
+    applyScrollSpeed(data.scrollSpeed);
 
     // In iframes: visibility is controlled by fullscreen events
 

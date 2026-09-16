@@ -93,6 +93,37 @@
       background: #e53935;
     }
 
+    .speed-row {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 8px;
+    }
+
+    .speed-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .speed-value {
+      font-size: 12px;
+      color: #e53935;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .speed-slider {
+      width: 100%;
+      accent-color: #e53935;
+      cursor: pointer;
+    }
+
+    .speed-scale {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      color: #666;
+    }
+
     .section-title {
       font-size: 12px;
       font-weight: 600;
@@ -145,6 +176,18 @@
         <input type="checkbox" id="toggleVisible" checked>
         <span class="toggle-slider"></span>
       </label>
+    </div>
+
+    <div class="setting-row speed-row">
+      <div class="speed-header">
+        <span class="setting-label">מהירות גלילה</span>
+        <span class="speed-value" id="speedValue">60</span>
+      </div>
+      <input type="range" class="speed-slider" id="speedSlider" min="20" max="200" step="10" value="60">
+      <div class="speed-scale">
+        <span>איטי</span>
+        <span>מהיר</span>
+      </div>
     </div>
 
     <div class="section-title">מקורות חדשות</div>
